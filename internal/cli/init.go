@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/ulgerang/gdc-sentinel/internal/config"
+	"github.com/ulgerang/gdc-sentinel/internal/ignore"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -75,6 +76,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	configPath := filepath.Join(sentinelDir, "config.yaml")
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
+	}
+
+	ignorePath := filepath.Join(cwd, ignore.DefaultFilename)
+	if _, err := os.Stat(ignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(ignorePath, []byte(ignore.DefaultContent()), 0644); err != nil {
+			return fmt.Errorf("write ignore file: %w", err)
+		}
+		printInfo("Created %s", ignore.DefaultFilename)
 	}
 
 	printSuccess("Initialized gdc-sentinel for project '%s'", name)
