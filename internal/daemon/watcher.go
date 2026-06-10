@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -14,15 +16,17 @@ import (
 )
 
 type Watcher struct {
-	name       string
-	workspace  string
-	fswatcher  *fsnotify.Watcher
-	debounce   time.Duration
-	mu         sync.Mutex
-	pending    map[string]time.Time
-	stopCh     chan struct{}
-	done       chan struct{}
-	scanFn     ScanFunc
+	name      string
+	workspace string
+	fswatcher *fsnotify.Watcher
+	debounce  time.Duration
+	mu        sync.Mutex
+	pending   map[string]time.Time
+	stopCh    chan struct{}
+	done      chan struct{}
+	scanFn    ScanFunc
+	scanCount int64
+	stateDir  string
 }
 
 type ScanFunc func(workspace, filePath string) error
@@ -42,6 +46,7 @@ func NewWatcher(name, workspace string, scanFn ScanFunc) (*Watcher, error) {
 		stopCh:    make(chan struct{}),
 		done:      make(chan struct{}),
 		scanFn:    scanFn,
+		stateDir:  filepath.Join(workspace, ".gdc-sentinel", "daemons", name),
 	}, nil
 }
 
@@ -142,6 +147,25 @@ func (w *Watcher) isDir(path string) bool {
 	return err == nil && fi.IsDir()
 }
 
+func (w *Watcher) ScanCount() int64 {
+	return atomic.LoadInt64(&w.scanCount)
+}
+
+type watcherState struct {
+	Name      string `json:"name"`
+	ScanCount int64  `json:"scan_count"`
+}
+
+func (w *Watcher) saveState() {
+	os.MkdirAll(w.stateDir, 0755)
+	state := watcherState{
+		Name:      w.name,
+		ScanCount: w.scanCount,
+	}
+	data, _ := json.Marshal(state)
+	os.WriteFile(filepath.Join(w.stateDir, "state.json"), data, 0644)
+}
+
 func (w *Watcher) flushPending() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -159,6 +183,9 @@ func (w *Watcher) flushPending() {
 		log.Printf("[watcher:%s] change detected: %s", w.name, path)
 		if err := w.scanFn(w.workspace, path); err != nil {
 			log.Printf("[watcher:%s] scan error for %s: %v", w.name, path, err)
+		} else {
+			atomic.AddInt64(&w.scanCount, 1)
+			w.saveState()
 		}
 	}
 }

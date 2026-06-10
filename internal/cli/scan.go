@@ -71,60 +71,31 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if !ok {
 			continue
 		}
-		status := parsed.changeType
-		filePath := parsed.filePath
 
-		if !shouldScan(filePath, cfg.Scan) {
+		if !shouldScan(parsed.filePath, cfg.Scan) {
 			continue
 		}
 
 		filesScanned++
 
-		client := gdc.NewClient(cfg.Project.GDCCommand, projectRoot, cfg.GDCCommands())
-		queryResult, err := client.Query(filePath)
+		result, err := scanFile(cfg, projectRoot, inboxMgr, parsed.filePath, parsed.changeType)
 		if err != nil {
+			printWarning("Scan failed for %s: %v", parsed.filePath, err)
+			continue
+		}
+		if result.QueryFailed {
 			filesQueryFailed++
-			printWarning("Could not query node for %s: %v", filePath, err)
 			continue
 		}
-
-		nodeID := queryResult.CanonicalID
-		if nodeID == "" {
-			nodeID = queryResult.ID
+		if result.DiffFailed {
+			filesDiffFailed++
 		}
-		if nodeID == "" {
-			continue
+		if result.Created {
+			itemsCreated++
 		}
-
-		nodesFound++
-
-		var driftResp *gdc.DiffResponse
-		if nodeID != "" {
-			diffResult, diffErr := client.Diff(nodeID)
-			if diffErr == nil {
-				driftResp = diffResult
-			} else {
-				filesDiffFailed++
-				printWarning("Could not diff %s: %v", nodeID, diffErr)
-			}
+		if result.NodeFound {
+			nodesFound++
 		}
-
-		changeType := mapGitStatus(status)
-
-		item := inbox.DriftItem{
-			NodeID:      nodeID,
-			FilePath:    filePath,
-			ChangeType:  changeType,
-			Drift:       driftResp,
-			QueryResult: queryResult,
-		}
-
-		if err := inboxMgr.Create(item); err != nil {
-			printWarning("Could not create drift item for %s: %v", filePath, err)
-			continue
-		}
-
-		itemsCreated++
 	}
 
 	printSuccess("Scan complete: %d files scanned, %d nodes found, %d drift items created",
@@ -134,6 +105,60 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+type scanFileResult struct {
+	NodeID       string
+	NodeFound    bool
+	Created      bool
+	QueryFailed  bool
+	DiffFailed   bool
+}
+
+func scanFile(cfg *config.Config, projectRoot string, inboxMgr *inbox.Manager, filePath, changeType string) (*scanFileResult, error) {
+	result := &scanFileResult{}
+
+	client := gdc.NewClient(cfg.Project.GDCCommand, projectRoot, cfg.GDCCommands())
+	queryResult, err := client.Query(filePath)
+	if err != nil {
+		result.QueryFailed = true
+		return result, fmt.Errorf("query %s: %w", filePath, err)
+	}
+
+	nodeID := queryResult.CanonicalID
+	if nodeID == "" {
+		nodeID = queryResult.ID
+	}
+	if nodeID == "" {
+		return result, nil
+	}
+
+	result.NodeFound = true
+	result.NodeID = nodeID
+
+	var driftResp *gdc.DiffResponse
+	diffResult, diffErr := client.Diff(nodeID)
+	if diffErr == nil {
+		driftResp = diffResult
+	} else {
+		result.DiffFailed = true
+		printWarning("Could not diff %s: %v", nodeID, diffErr)
+	}
+
+	item := inbox.DriftItem{
+		NodeID:      nodeID,
+		FilePath:    filePath,
+		ChangeType:  mapGitStatus(changeType),
+		Drift:       driftResp,
+		QueryResult: queryResult,
+	}
+
+	if err := inboxMgr.Create(item); err != nil {
+		return result, fmt.Errorf("create drift item for %s: %w", filePath, err)
+	}
+
+	result.Created = true
+	return result, nil
 }
 
 func shouldScan(filePath string, scanCfg config.ScanConfig) bool {

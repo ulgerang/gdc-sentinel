@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/ulgerang/gdc-sentinel/internal/config"
 	"github.com/ulgerang/gdc-sentinel/internal/daemon"
+	"github.com/ulgerang/gdc-sentinel/internal/inbox"
 )
 
 var (
@@ -362,8 +363,25 @@ var watchCmd = &cobra.Command{
 		watchName, _ := cmd.Flags().GetString("name")
 		watchWorkspace, _ := cmd.Flags().GetString("workspace")
 
+		cfg, err := config.Load(watchWorkspace)
+		if err != nil {
+			return fmt.Errorf("load config for %s: %w", watchWorkspace, err)
+		}
+		projectRoot := cfg.ResolvePath(cfg.Project.Path)
+		inboxMgr := inbox.NewManager(cfg.SentinelDir())
+
 		scanFn := func(workspace, filePath string) error {
-			printInfo("[scan] %s changed in %s", filePath, workspace)
+			if !shouldScan(filePath, cfg.Scan) {
+				return nil
+			}
+			printInfo("[scan] %s changed", filePath)
+			result, err := scanFile(cfg, projectRoot, inboxMgr, filePath, "M")
+			if err != nil {
+				return err
+			}
+			if result.Created {
+				printSuccess("Drift item created for %s (node: %s)", filePath, result.NodeID)
+			}
 			return nil
 		}
 
