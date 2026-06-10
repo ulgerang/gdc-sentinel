@@ -1,0 +1,9 @@
+# Build artifacts
+gdc-sentinel
+*.test
+*.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
