@@ -14,6 +14,7 @@ type Config struct {
 	Project     ProjectConfig              `yaml:"project"`
 	GDC         GDCConfig                  `yaml:"gdc"`
 	Scan        ScanConfig                 `yaml:"scan"`
+	Watch       WatchConfig                `yaml:"watch"`
 	DriftPolicy DriftPolicy                `yaml:"drift_policy"`
 	Packets     PacketsConfig              `yaml:"packets"`
 	Agents      map[string]AgentConfig     `yaml:"agents"`
@@ -35,6 +36,13 @@ type GDCConfig struct {
 type ScanConfig struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
+}
+
+type WatchConfig struct {
+	IgnoreDirs   []string `yaml:"ignore_dirs"`
+	IgnoreExts   []string `yaml:"ignore_exts"`
+	IgnoreFiles  []string `yaml:"ignore_files"`
+	DebounceMs   int      `yaml:"debounce_ms"`
 }
 
 type DriftPolicy struct {
@@ -111,6 +119,12 @@ func DefaultConfig() *Config {
 			Include: []string{"**/*.go", "**/*.ts", "**/*.tsx"},
 			Exclude: []string{"vendor/**", "node_modules/**", ".git/**"},
 		},
+		Watch: WatchConfig{
+			IgnoreDirs:  []string{".git", "node_modules", "vendor", ".gdc-sentinel", "__pycache__", ".next", ".cache", "dist", "build", "target", "bin"},
+			IgnoreExts:  []string{".test", ".out", ".log", ".tmp", ".swp", ".swo"},
+			IgnoreFiles: []string{".DS_Store", "Thumbs.db"},
+			DebounceMs:  500,
+		},
 		DriftPolicy: DriftPolicy{
 			AutoWriteSpecs:       false,
 			RequireHumanApproval: true,
@@ -173,4 +187,47 @@ func (c *Config) GDCCommands() map[string][]string {
 		out[k] = v
 	}
 	return out
+}
+
+func (c *Config) EffectiveWatch() WatchConfig {
+	w := c.Watch
+	defaults := DefaultConfig().Watch
+	if len(w.IgnoreDirs) == 0 {
+		w.IgnoreDirs = defaults.IgnoreDirs
+	}
+	if len(w.IgnoreExts) == 0 {
+		w.IgnoreExts = defaults.IgnoreExts
+	}
+	if len(w.IgnoreFiles) == 0 {
+		w.IgnoreFiles = defaults.IgnoreFiles
+	}
+	if w.DebounceMs == 0 {
+		w.DebounceMs = 500
+	}
+	return w
+}
+
+func (w *WatchConfig) ShouldIgnoreDir(name string) bool {
+	for _, d := range w.IgnoreDirs {
+		if name == d {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *WatchConfig) ShouldIgnoreFile(name string) bool {
+	base := filepath.Base(name)
+	for _, f := range w.IgnoreFiles {
+		if base == f {
+			return true
+		}
+	}
+	ext := filepath.Ext(name)
+	for _, e := range w.IgnoreExts {
+		if ext == e {
+			return true
+		}
+	}
+	return false
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/ulgerang/gdc-sentinel/internal/config"
 	"github.com/ulgerang/gdc-sentinel/internal/daemon"
 	"github.com/ulgerang/gdc-sentinel/internal/inbox"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -345,6 +346,14 @@ func init() {
 	daemonCmd.AddCommand(daemonListCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+	daemonCmd.AddCommand(daemonIgnoreCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreListCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreAddDirCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreRmDirCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreAddExtCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreRmExtCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreAddFileCmd)
+	daemonIgnoreCmd.AddCommand(daemonIgnoreRmFileCmd)
 
 	daemonStartCmd.Flags().StringVar(&daemonName, "name", "", "workspace name (default: directory name)")
 	daemonStartCmd.Flags().StringVar(&daemonWorkspace, "workspace", ".", "workspace path to watch")
@@ -353,6 +362,183 @@ func init() {
 	daemonStatusCmd.Flags().StringVar(&daemonName, "name", "", "workspace name")
 	daemonLogsCmd.Flags().StringVar(&daemonName, "name", "", "workspace name")
 	daemonLogsCmd.Flags().BoolVar(&daemonFollow, "follow", false, "follow log output (tail -f)")
+}
+
+var daemonIgnoreCmd = &cobra.Command{
+	Use:   "ignore",
+	Short: "Manage watch ignore lists",
+	Long: `Manage file/directory ignore patterns for the file watcher.
+
+Subcommands:
+  list              Show current ignore settings
+  add-dir DIR       Add directory name to ignore list
+  rm-dir DIR        Remove directory name from ignore list
+  add-ext EXT       Add file extension to ignore list (e.g. .log)
+  rm-ext EXT        Remove file extension from ignore list
+  add-file FILE     Add filename to ignore list (e.g. .DS_Store)
+  rm-file FILE      Remove filename from ignore list`,
+}
+
+var daemonIgnoreListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "Show current ignore settings",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load("")
+		if err != nil {
+			return err
+		}
+		w := cfg.EffectiveWatch()
+		fmt.Println("Ignored directories:")
+		for _, d := range w.IgnoreDirs {
+			fmt.Printf("  %s\n", d)
+		}
+		fmt.Println("Ignored extensions:")
+		for _, e := range w.IgnoreExts {
+			fmt.Printf("  %s\n", e)
+		}
+		fmt.Println("Ignored files:")
+		for _, f := range w.IgnoreFiles {
+			fmt.Printf("  %s\n", f)
+		}
+		fmt.Printf("Debounce: %dms\n", w.DebounceMs)
+		return nil
+	},
+}
+
+var daemonIgnoreAddDirCmd = &cobra.Command{
+	Use:   "add-dir DIR",
+	Short: "Add directory to ignore list",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			for _, d := range w.IgnoreDirs {
+				if d == args[0] {
+					printInfo("%s already ignored", args[0])
+					return
+				}
+			}
+			w.IgnoreDirs = append(w.IgnoreDirs, args[0])
+			printSuccess("Added %s to ignored directories", args[0])
+		})
+	},
+}
+
+var daemonIgnoreRmDirCmd = &cobra.Command{
+	Use:   "rm-dir DIR",
+	Short: "Remove directory from ignore list",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			filtered := w.IgnoreDirs[:0]
+			for _, d := range w.IgnoreDirs {
+				if d != args[0] {
+					filtered = append(filtered, d)
+				}
+			}
+			w.IgnoreDirs = filtered
+			printSuccess("Removed %s from ignored directories", args[0])
+		})
+	},
+}
+
+var daemonIgnoreAddExtCmd = &cobra.Command{
+	Use:   "add-ext EXT",
+	Short: "Add file extension to ignore list (e.g. .log)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ext := args[0]
+		if ext[0] != '.' {
+			ext = "." + ext
+		}
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			for _, e := range w.IgnoreExts {
+				if e == ext {
+					printInfo("%s already ignored", ext)
+					return
+				}
+			}
+			w.IgnoreExts = append(w.IgnoreExts, ext)
+			printSuccess("Added %s to ignored extensions", ext)
+		})
+	},
+}
+
+var daemonIgnoreRmExtCmd = &cobra.Command{
+	Use:   "rm-ext EXT",
+	Short: "Remove file extension from ignore list",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ext := args[0]
+		if ext[0] != '.' {
+			ext = "." + ext
+		}
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			filtered := w.IgnoreExts[:0]
+			for _, e := range w.IgnoreExts {
+				if e != ext {
+					filtered = append(filtered, e)
+				}
+			}
+			w.IgnoreExts = filtered
+			printSuccess("Removed %s from ignored extensions", ext)
+		})
+	},
+}
+
+var daemonIgnoreAddFileCmd = &cobra.Command{
+	Use:   "add-file FILE",
+	Short: "Add filename to ignore list (e.g. .DS_Store)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			for _, f := range w.IgnoreFiles {
+				if f == args[0] {
+					printInfo("%s already ignored", args[0])
+					return
+				}
+			}
+			w.IgnoreFiles = append(w.IgnoreFiles, args[0])
+			printSuccess("Added %s to ignored files", args[0])
+		})
+	},
+}
+
+var daemonIgnoreRmFileCmd = &cobra.Command{
+	Use:   "rm-file FILE",
+	Short: "Remove filename from ignore list",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return updateWatchConfig(func(w *config.WatchConfig) {
+			filtered := w.IgnoreFiles[:0]
+			for _, f := range w.IgnoreFiles {
+				if f != args[0] {
+					filtered = append(filtered, f)
+				}
+			}
+			w.IgnoreFiles = filtered
+			printSuccess("Removed %s from ignored files", args[0])
+		})
+	},
+}
+
+func updateWatchConfig(mutate func(*config.WatchConfig)) error {
+	cfg, err := config.Load("")
+	if err != nil {
+		return err
+	}
+	effective := cfg.EffectiveWatch()
+	cfg.Watch = effective
+	mutate(&cfg.Watch)
+	return writeConfig(cfg)
+}
+
+func writeConfig(cfg *config.Config) error {
+	configPath := cfg.SentinelDir() + "/config.yaml"
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(configPath, data, 0644)
 }
 
 var watchCmd = &cobra.Command{
@@ -385,7 +571,7 @@ var watchCmd = &cobra.Command{
 			return nil
 		}
 
-		w, err := daemon.NewWatcher(watchName, watchWorkspace, scanFn)
+		w, err := daemon.NewWatcher(watchName, watchWorkspace, scanFn, cfg.EffectiveWatch())
 		if err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/ulgerang/gdc-sentinel/internal/config"
 )
 
 type Watcher struct {
@@ -27,26 +28,33 @@ type Watcher struct {
 	scanFn    ScanFunc
 	scanCount int64
 	stateDir  string
+	watchCfg  config.WatchConfig
 }
 
 type ScanFunc func(workspace, filePath string) error
 
-func NewWatcher(name, workspace string, scanFn ScanFunc) (*Watcher, error) {
+func NewWatcher(name, workspace string, scanFn ScanFunc, watchCfg config.WatchConfig) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("create fsnotify watcher: %w", err)
+	}
+
+	debounce := time.Duration(watchCfg.DebounceMs) * time.Millisecond
+	if debounce == 0 {
+		debounce = 500 * time.Millisecond
 	}
 
 	return &Watcher{
 		name:      name,
 		workspace: workspace,
 		fswatcher: fsw,
-		debounce:  500 * time.Millisecond,
+		debounce:  debounce,
 		pending:   make(map[string]time.Time),
 		stopCh:    make(chan struct{}),
 		done:      make(chan struct{}),
 		scanFn:    scanFn,
 		stateDir:  filepath.Join(workspace, ".gdc-sentinel", "daemons", name),
+		watchCfg:  watchCfg,
 	}, nil
 }
 
@@ -115,7 +123,7 @@ func (w *Watcher) addWatchTargets(sentinelDir string) error {
 			return nil
 		}
 		base := filepath.Base(path)
-		if base == ".git" || base == "node_modules" || base == "vendor" || base == ".gdc-sentinel" {
+		if w.watchCfg.ShouldIgnoreDir(base) {
 			return filepath.SkipDir
 		}
 		dirs = append(dirs, path)
@@ -131,15 +139,7 @@ func (w *Watcher) addWatchTargets(sentinelDir string) error {
 }
 
 func (w *Watcher) shouldIgnore(name string) bool {
-	ext := filepath.Ext(name)
-	if ext == ".test" || ext == ".out" {
-		return true
-	}
-	base := filepath.Base(name)
-	if base[0] == '.' && base != ".go" {
-		return true
-	}
-	return false
+	return w.watchCfg.ShouldIgnoreFile(name)
 }
 
 func (w *Watcher) isDir(path string) bool {

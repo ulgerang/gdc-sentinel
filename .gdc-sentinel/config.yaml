@@ -1,0 +1,101 @@
+version: 1
+project:
+    name: gdc-sentinel
+    path: .
+    gdc_command: gdc
+    default_since: 24h
+gdc:
+    prefer_context_command: false
+    commands:
+        check:
+            - check
+            - --format
+            - json
+        context:
+            - context
+            - '{node}'
+            - --with-impl
+            - --with-tests
+            - --with-callers
+        deps:
+            - deps
+            - '{node}'
+            - --depth
+            - '{depth}'
+        diff:
+            - diff
+            - '{node}'
+            - --format
+            - json
+        extract:
+            - extract
+            - '{node}'
+        graph:
+            - graph
+            - --format
+            - json
+        query:
+            - query
+            - '{symbol}'
+            - --format
+            - json
+        refs:
+            - refs
+            - '{node}'
+            - --depth
+            - '{depth}'
+scan:
+    include:
+        - '**/*.go'
+        - '**/*.ts'
+        - '**/*.tsx'
+    exclude:
+        - vendor/**
+        - node_modules/**
+        - .git/**
+watch:
+    ignore_dirs:
+        - .git
+        - node_modules
+        - vendor
+        - .gdc-sentinel
+        - __pycache__
+        - .cache
+        - dist
+        - build
+        - target
+        - bin
+    ignore_exts:
+        - .test
+        - .out
+        - .log
+        - .tmp
+        - .swp
+        - .swo
+    ignore_files:
+        - .DS_Store
+        - Thumbs.db
+    debounce_ms: 500
+drift_policy:
+    auto_write_specs: false
+    require_human_approval: true
+    confidence_threshold: high
+packets:
+    default_agent: default
+    include:
+        - context
+        - drift
+        - notes
+        - changed_files
+agents:
+    default:
+        type: cli
+        command: echo
+        args:
+            - '{{packet_path}}'
+        input_mode: file
+        working_dir: .
+        timeout_seconds: 300
+templates:
+    default_packet: default
+    agent_instructions: {}
