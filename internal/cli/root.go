@@ -52,6 +52,8 @@ func init() {
 	rootCmd.AddCommand(packetCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(noteCmd)
+	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(watchCmd)
 }
 
 func Execute() error {
